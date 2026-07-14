@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ExileApiPluginDevBridge;
 
@@ -136,9 +137,9 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             WriteJsonAtomically(Settings.SnapshotFilePath.Value, snapshot);
             WriteStatus("snapshot_captured");
         }
-        catch
+        catch (Exception exception)
         {
-            // Capturing diagnostics must never disturb ExileAPI's render lifecycle.
+            WriteStatus($"snapshot_failed:{exception.GetType().Name}");
         }
     }
 
@@ -189,7 +190,11 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
         var temporaryPath = path + ".tmp";
-        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(content, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(content, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        }));
         File.Move(temporaryPath, path, true);
     }
 }

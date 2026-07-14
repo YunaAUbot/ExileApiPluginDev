@@ -88,6 +88,16 @@ def read_last_build_errors(max_lines: int = 200) -> str:
     modified_at = (
         datetime.fromtimestamp(error_log.stat().st_mtime, timezone.utc).isoformat() if error_log.is_file() else None
     )
+    return json.dumps(
+        {
+            "path": str(error_log),
+            "exists": error_log.is_file(),
+            "modified_at": modified_at,
+            "content": read_tail(error_log, max_lines),
+            "note": "Errors.txt can remain unchanged after a successful ExileAPI build; compare modified_at with the last Build/Reload time.",
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -96,6 +106,16 @@ def read_runtime_status() -> str:
     status_file = SERVER_ROOT / "runtime-status.json"
     modified_at = (
         datetime.fromtimestamp(status_file.stat().st_mtime, timezone.utc).isoformat() if status_file.is_file() else None
+    )
+    return json.dumps(
+        {
+            "path": str(status_file),
+            "exists": status_file.is_file(),
+            "modified_at": modified_at,
+            "content": read_tail(status_file, 200),
+            "expected": "Run ExileAPI Build/Reload with ExileAPI Plugin Dev Bridge enabled.",
+        },
+        indent=2,
     )
 
 
@@ -126,18 +146,6 @@ def read_game_snapshot(section: str | None = None, max_characters: int = 60000) 
         },
         indent=2,
     )
-    return json.dumps(
-        {
-            "path": str(status_file),
-            "exists": status_file.is_file(),
-            "modified_at": modified_at,
-            "content": read_tail(status_file, 200),
-            "expected": "Run ExileAPI Build/Reload with ExileAPI Plugin Dev Bridge enabled.",
-        },
-        indent=2,
-    )
-
-
 @mcp.tool()
 def find_plugin_examples(query: str, max_results: int = 20) -> str:
     """Find relevant local ExileAPI C# examples and return the exApiTools plugin catalogue link."""
@@ -170,18 +178,6 @@ def find_plugin_examples(query: str, max_results: int = 20) -> str:
         },
         indent=2,
     )
-    return json.dumps(
-        {
-            "path": str(error_log),
-            "exists": error_log.is_file(),
-            "modified_at": modified_at,
-            "content": read_tail(error_log, max_lines),
-            "note": "Errors.txt can remain unchanged after a successful ExileAPI build; compare modified_at with the last Build/Reload time.",
-        },
-        indent=2,
-    )
-
-
 def main() -> None:
     mcp.run(transport="stdio")
 
