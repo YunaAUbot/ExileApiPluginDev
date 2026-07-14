@@ -39,6 +39,8 @@ public sealed class BridgeSettings : ISettings
     public TextNode CustomSnapshotShortcuts { get; set; } = new TextNode("PlayerInventory.Items");
     [Menu(null, "An MCP request here is applied only after the Capture snapshot button is pressed")]
     public TextNode CaptureRequestFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\capture-request.json");
+    [Menu(null, "Allow a prepared MCP request to override the selected profile for this capture")]
+    public ToggleNode UsePendingMcpCaptureRequest { get; set; } = new(false);
     public RangeNode<int> SnapshotMaxDepth { get; set; } = new(6, 1, 10);
     public RangeNode<int> SnapshotMaxNodes { get; set; } = new(500, 50, 5000);
     public RangeNode<int> SnapshotMaxCollectionEntries { get; set; } = new(100, 1, 1000);
@@ -155,7 +157,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 ["UIHover"] = GameController.IngameState.UIHover,
             };
             var requestPath = Settings.CaptureRequestFilePath.Value;
-            var request = ReadCaptureRequest(requestPath);
+            var request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
             var profile = request?.Profile ?? GetSelectedCaptureProfile();
             var plan = CreateCapturePlan(profile, request?.Sections ?? ParseShortcuts(Settings.CustomSnapshotShortcuts.Value), roots.Keys);
             var capturedRoots = new Dictionary<string, object>();
@@ -171,6 +173,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 schemaVersion = 1,
                 capturedAtUtc = DateTimeOffset.UtcNow,
                 profile = plan.Profile,
+                usedMcpCaptureRequest = request != null,
                 limits = new
                 {
                     maxDepth = plan.MaxDepth,

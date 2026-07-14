@@ -194,7 +194,7 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
             "custom_sections": sections,
             "profile_description": BRIDGE_CAPTURE_PROFILES[matched_profile],
             "safety": "The request only selects bounded, read-only export data. It is consumed only when the user presses Capture snapshot in the enabled bridge plugin.",
-            "next_step": "Press Capture snapshot in ExileAPI; the bridge removes this request after a successful export.",
+            "next_step": "Enable UsePendingMcpCaptureRequest and press Capture snapshot in ExileAPI; the bridge removes this request after a successful export.",
         },
         indent=2,
     )
