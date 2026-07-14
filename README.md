@@ -29,3 +29,7 @@ ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button af
 The enabled bridge writes a small read-only `runtime-status.json` after successful initialisation and area changes. Its default path matches the existing `Z:` mount used by ExileAPI on this machine; it can be changed in the plugin settings.
 
 For larger diagnostics, use **Capture snapshot** in the bridge's ExileAPI menu. It writes `game-snapshot.json` only when pressed. Defaults are: depth 6, 500 total nodes, 100 collection entries per node, 512 characters per string, and no memory addresses. `read_game_snapshot` reads the frozen result through MCP.
+
+## ExileAPI core snapshots
+
+`list_core_snapshots`, `inspect_core_snapshot`, `find_core_snapshot_paths`, and `read_core_snapshot_member` work with ExileAPI's `snapshots/*.exapisnap` files. The indexer reads 512-byte TAR headers and seeks over member bodies; it never extracts or feeds a multi-gigabyte snapshot to the model. `find_core_snapshot_paths` supports required and excluded path terms; read a member only after narrowing it through the indexed path list.

@@ -15,11 +15,14 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from exileapi_plugin_dev.core import create_plugin_workspace, read_tail
+from exileapi_plugin_dev.snapshot_archive import filter_entries, load_or_build_index, read_member, select_entries, top_level_summary
 
 # server.py -> exileapi_plugin_dev -> src -> repository root
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EXILEAPI_ROOT = Path.home() / "ExileApi-Compiled"
 WORKSPACE_ROOT = Path.home() / "ExileApiPlugins"
+SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
+SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"
 
 mcp = FastMCP(
     "ExileAPI Plugin Development",
@@ -175,6 +178,90 @@ def find_plugin_examples(query: str, max_results: int = 20) -> str:
             "matches": matches,
             "catalogue": "https://github.com/orgs/exApiTools/repositories",
             "note": "The catalogue is the recommended external source for additional maintained ExileAPI plugin examples.",
+        },
+        indent=2,
+    )
+
+
+def _snapshot_path(snapshot_name: str) -> Path:
+    if Path(snapshot_name).name != snapshot_name or not snapshot_name.endswith(".exapisnap"):
+        raise ValueError("snapshot_name must be the basename of an .exapisnap file.")
+    snapshot = SNAPSHOT_ROOT / snapshot_name
+    if not snapshot.is_file():
+        raise ValueError(f"Snapshot does not exist: {snapshot_name}")
+    return snapshot
+
+
+@mcp.tool()
+def list_core_snapshots() -> str:
+    """List ExileAPI's .exapisnap files without reading their multi-gigabyte contents."""
+    snapshots = []
+    for snapshot in sorted(SNAPSHOT_ROOT.glob("*.exapisnap"), key=lambda item: item.stat().st_mtime, reverse=True):
+        stat = snapshot.stat()
+        snapshots.append(
+            {
+                "name": snapshot.name,
+                "size": stat.st_size,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                "index_cached": (SNAPSHOT_INDEX_ROOT / f"{snapshot.name}.index.json").is_file(),
+            }
+        )
+    return json.dumps({"snapshot_root": str(SNAPSHOT_ROOT), "snapshots": snapshots}, indent=2)
+
+
+@mcp.tool()
+def inspect_core_snapshot(snapshot_name: str, path_prefix: str = "", query: str = "", limit: int = 100) -> str:
+    """Build/read a header-only snapshot index and return a bounded table of matching archive paths."""
+    snapshot = _snapshot_path(snapshot_name)
+    index = load_or_build_index(snapshot, SNAPSHOT_INDEX_ROOT)
+    return json.dumps(
+        {
+            "snapshot": snapshot.name,
+            "size": index["size"],
+            "entry_count": len(index["entries"]),
+            "top_level": top_level_summary(index),
+            "matches": select_entries(index, path_prefix, query, limit),
+            "note": "Only TAR headers were read; member bodies were skipped with seeks.",
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def find_core_snapshot_paths(
+    snapshot_name: str, include_terms: list[str], exclude_terms: list[str] | None = None, limit: int = 100
+) -> str:
+    """Return only indexed snapshot paths matching all include terms and none of the excluded terms."""
+    snapshot = _snapshot_path(snapshot_name)
+    index = load_or_build_index(snapshot, SNAPSHOT_INDEX_ROOT)
+    return json.dumps(
+        {
+            "snapshot": snapshot.name,
+            "include_terms": include_terms,
+            "exclude_terms": exclude_terms or [],
+            "matches": filter_entries(index, include_terms, exclude_terms or [], limit),
+            "note": "Filtered from the cached TAR table of contents only; no member data was read.",
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def read_core_snapshot_member(snapshot_name: str, path: str, max_bytes: int = 100_000) -> str:
+    """Read a bounded byte range from one exact, indexed regular-file path in an ExileAPI snapshot."""
+    snapshot = _snapshot_path(snapshot_name)
+    index = load_or_build_index(snapshot, SNAPSHOT_INDEX_ROOT)
+    data = read_member(snapshot, index, path, max_bytes)
+    text = data.decode("utf-8", errors="replace")
+    printable = sum(character.isprintable() or character in "\r\n\t" for character in text)
+    return json.dumps(
+        {
+            "snapshot": snapshot.name,
+            "path": path,
+            "bytes_returned": len(data),
+            "likely_text": printable / max(1, len(text)) > 0.9,
+            "content": text if printable / max(1, len(text)) > 0.9 else data[:256].hex(),
+            "content_encoding": "utf-8" if printable / max(1, len(text)) > 0.9 else "hex-prefix",
         },
         indent=2,
     )

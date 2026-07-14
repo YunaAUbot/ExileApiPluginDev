@@ -11,3 +11,4 @@ generated-plugins/
 Errors.txt
 runtime-status.json
 game-snapshot.json
+.snapshot-index/
