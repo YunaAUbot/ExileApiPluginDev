@@ -102,7 +102,6 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             var inventory = GameController.IngameState.Data.ServerData.PlayerInventories.FirstOrDefault()?.Inventory;
             var roots = new Dictionary<string, object>
             {
-                ["Cache"] = GameController.Cache,
                 ["GameController"] = GameController,
                 ["TheGame"] = GameController.Game,
                 ["Player"] = GameController.Player,
@@ -115,10 +114,17 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 ["ItemsOnGroundLabels"] = GameController.IngameState.IngameUi.ItemsOnGroundLabels,
                 ["UIHover"] = GameController.IngameState.UIHover,
             };
-            var budget = Settings.SnapshotMaxNodes.Value;
-            var capturedRoots = roots.ToDictionary(
-                pair => pair.Key,
-                pair => SnapshotValue(pair.Value, 0, ref budget));
+            // A shared budget causes the first broad root (usually GameController)
+            // to starve all DevTree shortcuts.  Give every explicitly requested
+            // shortcut its own bounded traversal instead.
+            var capturedRoots = new Dictionary<string, object>();
+            var remainingBudgets = new Dictionary<string, int>();
+            foreach (var pair in roots)
+            {
+                var budget = Settings.SnapshotMaxNodes.Value;
+                capturedRoots[pair.Key] = SnapshotValue(pair.Value, 0, ref budget);
+                remainingBudgets[pair.Key] = budget;
+            }
             var snapshot = new
             {
                 schemaVersion = 1,
@@ -131,7 +137,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                     maxStringLength = Settings.SnapshotMaxStringLength.Value,
                     includeAddresses = false,
                 },
-                remainingNodeBudget = budget,
+                remainingNodeBudgetByShortcut = remainingBudgets,
                 shortcuts = capturedRoots,
             };
             WriteJsonAtomically(Settings.SnapshotFilePath.Value, snapshot);
