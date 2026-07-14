@@ -1,6 +1,7 @@
 using ExileCore;
 using ExileCore.PoEMemory;
 using ExileCore.Shared.Interfaces;
+using ExileCore.Shared.Nodes;
 
 namespace ExileApiPluginDevBridge;
 
@@ -10,7 +11,7 @@ namespace ExileApiPluginDevBridge;
 /// </summary>
 public sealed class BridgeSettings : ISettings
 {
-    public bool Enable { get; set; } = false;
+    public ToggleNode Enable { get; set; } = new(false);
 }
 
 public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
