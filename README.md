@@ -6,7 +6,8 @@ An MCP server that gives coding agents a bounded development workflow for ExileA
 
 - Detect local ExileAPI compiler references.
 - Scaffold source-only C# plugin projects below `generated-plugins/`.
-- Build generated projects with the local ExileAPI package directory.
+- Prepare the linked source tree for ExileAPI's in-game **Build/Reload** action.
+- Read the resulting bounded `Errors.txt` output.
 
 It deliberately does **not** expose DevTree's dynamic C# evaluator, read or write process memory, or send game input. The current companion plugin has no IPC surface; a future runtime bridge must be separately reviewed and read-only.
 
@@ -22,4 +23,4 @@ The repository is linked into ExileAPI source plugins at:
 
 `~/ExileApi-Compiled/Plugins/Source/ExileApiPluginDev -> ~/ExileApiPluginDev`
 
-`dotnet` and a Windows-compatible .NET 10 SDK are required to build generated ExileAPI projects.
+ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button after source changes; no Linux build worker is required.
