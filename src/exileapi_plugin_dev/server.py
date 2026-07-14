@@ -97,6 +97,35 @@ def read_runtime_status() -> str:
     modified_at = (
         datetime.fromtimestamp(status_file.stat().st_mtime, timezone.utc).isoformat() if status_file.is_file() else None
     )
+
+
+@mcp.tool()
+def read_game_snapshot(section: str | None = None, max_characters: int = 60000) -> str:
+    """Read a manually captured, read-only ExileAPI game snapshot or one shortcut section."""
+    if not 1_000 <= max_characters <= 500_000:
+        raise ValueError("max_characters must be between 1000 and 500000.")
+    snapshot_file = SERVER_ROOT / "game-snapshot.json"
+    if not snapshot_file.is_file():
+        return json.dumps({"path": str(snapshot_file), "exists": False, "expected": "Press Capture snapshot in the bridge plugin menu."}, indent=2)
+    try:
+        snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        return json.dumps({"path": str(snapshot_file), "exists": True, "error": f"Invalid JSON: {error.msg}"}, indent=2)
+    if section:
+        shortcuts = snapshot.get("shortcuts", {})
+        if section not in shortcuts:
+            return json.dumps({"path": str(snapshot_file), "exists": True, "available_sections": sorted(shortcuts), "error": "Unknown section."}, indent=2)
+        snapshot = {"schemaVersion": snapshot.get("schemaVersion"), "capturedAtUtc": snapshot.get("capturedAtUtc"), "section": section, "data": shortcuts[section]}
+    content = json.dumps(snapshot, indent=2, ensure_ascii=False)
+    return json.dumps(
+        {
+            "path": str(snapshot_file),
+            "modified_at": datetime.fromtimestamp(snapshot_file.stat().st_mtime, timezone.utc).isoformat(),
+            "content": content[:max_characters],
+            "truncated": len(content) > max_characters,
+        },
+        indent=2,
+    )
     return json.dumps(
         {
             "path": str(status_file),

@@ -27,3 +27,5 @@ ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button af
 `Errors.txt` may be retained after a successful build, so the MCP also reports its modification time.
 
 The enabled bridge writes a small read-only `runtime-status.json` after successful initialisation and area changes. Its default path matches the existing `Z:` mount used by ExileAPI on this machine; it can be changed in the plugin settings.
+
+For larger diagnostics, use **Capture snapshot** in the bridge's ExileAPI menu. It writes `game-snapshot.json` only when pressed. Defaults are: depth 6, 500 total nodes, 100 collection entries per node, 512 characters per string, and no memory addresses. `read_game_snapshot` reads the frozen result through MCP.
