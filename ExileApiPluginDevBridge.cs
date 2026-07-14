@@ -23,8 +23,18 @@ public sealed class BridgeSettings : ISettings
     public ToggleNode Enable { get; set; } = new(true);
     public TextNode StatusFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\runtime-status.json");
     public TextNode SnapshotFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\game-snapshot.json");
-    [Menu(null, "Overview, Player, PlayerInventory, UIHover, IngameUI, or Custom")]
-    public TextNode CaptureProfile { get; set; } = new TextNode("Overview");
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CaptureOverviewProfile { get; set; } = new(true);
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CapturePlayerProfile { get; set; } = new(false);
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CapturePlayerInventoryProfile { get; set; } = new(false);
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CaptureUIHoverProfile { get; set; } = new(false);
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CaptureIngameUIProfile { get; set; } = new(false);
+    [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CaptureCustomProfile { get; set; } = new(false);
     [Menu(null, "Only used by Custom; comma-separated DevTree shortcuts")]
     public TextNode CustomSnapshotShortcuts { get; set; } = new TextNode("PlayerInventory.Items");
     [Menu(null, "An MCP request here is applied only after the Capture snapshot button is pressed")]
@@ -146,7 +156,8 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             };
             var requestPath = Settings.CaptureRequestFilePath.Value;
             var request = ReadCaptureRequest(requestPath);
-            var plan = CreateCapturePlan(request?.Profile ?? Settings.CaptureProfile.Value, request?.Sections ?? ParseShortcuts(Settings.CustomSnapshotShortcuts.Value), roots.Keys);
+            var profile = request?.Profile ?? GetSelectedCaptureProfile();
+            var plan = CreateCapturePlan(profile, request?.Sections ?? ParseShortcuts(Settings.CustomSnapshotShortcuts.Value), roots.Keys);
             var capturedRoots = new Dictionary<string, object>();
             var remainingBudgets = new Dictionary<string, int>();
             foreach (var shortcut in plan.Shortcuts)
@@ -212,6 +223,20 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             "custom" => new CapturePlan("Custom", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
             _ => new CapturePlan("Overview", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
         };
+    }
+
+    private string GetSelectedCaptureProfile()
+    {
+        var selected = new List<string>();
+        if (Settings.CaptureOverviewProfile.Value) selected.Add("Overview");
+        if (Settings.CapturePlayerProfile.Value) selected.Add("Player");
+        if (Settings.CapturePlayerInventoryProfile.Value) selected.Add("PlayerInventory");
+        if (Settings.CaptureUIHoverProfile.Value) selected.Add("UIHover");
+        if (Settings.CaptureIngameUIProfile.Value) selected.Add("IngameUI");
+        if (Settings.CaptureCustomProfile.Value) selected.Add("Custom");
+        if (selected.Count != 1)
+            throw new InvalidOperationException("Select exactly one capture profile checkbox.");
+        return selected[0];
     }
 
     private static string[] ParseShortcuts(string value) => (value ?? string.Empty)
