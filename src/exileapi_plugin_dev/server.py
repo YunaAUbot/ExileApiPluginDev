@@ -25,6 +25,7 @@ WORKSPACE_ROOT = Path.home() / "ExileApiPlugins"
 SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
 SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"
 BRIDGE_CAPTURE_REQUEST = SERVER_ROOT / "capture-request.json"
+BRIDGE_CAPTURE_HISTORY = SERVER_ROOT / "capture-path-history.json"
 BRIDGE_CAPTURE_PROFILES = {
     "Overview": "All DevTree shortcuts with the bridge's configured limits.",
     "Player": "Player only; depth 8, 5,000 nodes, 500 collection entries.",
@@ -128,6 +129,133 @@ def read_runtime_status() -> str:
     modified_at = (
         datetime.fromtimestamp(status_file.stat().st_mtime, timezone.utc).isoformat() if status_file.is_file() else None
     )
+
+
+def _load_bridge_snapshot() -> tuple[Path, dict[str, object]]:
+    snapshot_file = SERVER_ROOT / "game-snapshot.json"
+    if not snapshot_file.is_file():
+        raise ValueError("No bridge snapshot exists. Capture a profile first.")
+    try:
+        snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Latest bridge snapshot is invalid JSON: {error.msg}") from error
+    if not isinstance(snapshot, dict):
+        raise ValueError("Latest bridge snapshot has an invalid top-level shape.")
+    return snapshot_file, snapshot
+
+
+def _resolve_bridge_path(snapshot: dict[str, object], path: str) -> object:
+    shortcuts = snapshot.get("shortcuts")
+    if not isinstance(shortcuts, dict) or not path:
+        raise ValueError("Snapshot has no shortcuts or path is empty.")
+    root = next((name for name in sorted(shortcuts, key=len, reverse=True) if path == name or path.startswith(name + ".")), None)
+    if root is None:
+        raise ValueError(f"Unknown snapshot path. Available roots: {', '.join(sorted(shortcuts))}")
+    value: object = shortcuts[root]
+    for segment in path[len(root):].lstrip(".").split("."):
+        if not segment:
+            continue
+        if not isinstance(value, dict) or segment not in value:
+            raise ValueError(f"Path is not present in this snapshot: {path}")
+        value = value[segment]
+    return value
+
+
+def _bridge_version_key() -> str:
+    core = DEFAULT_EXILEAPI_ROOT / "ExileCore.dll"
+    if not core.is_file():
+        return "unknown"
+    stat = core.stat()
+    return f"ExileCore-{stat.st_size}-{stat.st_mtime_ns}"
+
+
+def _remember_bridge_path(path: str, value: object, snapshot: dict[str, object]) -> None:
+    try:
+        history = json.loads(BRIDGE_CAPTURE_HISTORY.read_text(encoding="utf-8")) if BRIDGE_CAPTURE_HISTORY.is_file() else []
+        if not isinstance(history, list):
+            history = []
+        entry = {
+            "version": _bridge_version_key(),
+            "path": path,
+            "profile": snapshot.get("profile"),
+            "value_kind": type(value).__name__,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        history = [item for item in history if not (item.get("version") == entry["version"] and item.get("path") == path)]
+        history.append(entry)
+        BRIDGE_CAPTURE_HISTORY.write_text(json.dumps(history[-500:], indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _bridge_snapshot_index(snapshot: dict[str, object], max_entries: int) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+
+    def visit(value: object, path: str) -> None:
+        if len(entries) >= max_entries:
+            return
+        if isinstance(value, dict):
+            entries.append({"path": path, "kind": "object", "type": value.get("_type"), "children": len(value), "truncated": value.get("_truncated")})
+            for name, child in value.items():
+                if name.startswith("_"):
+                    continue
+                visit(child, f"{path}.{name}")
+        elif isinstance(value, list):
+            entries.append({"path": path, "kind": "list", "entries": len(value)})
+        else:
+            entries.append({"path": path, "kind": type(value).__name__, "value": str(value)[:160]})
+
+    shortcuts = snapshot.get("shortcuts", {})
+    if isinstance(shortcuts, dict):
+        for root, value in shortcuts.items():
+            visit(value, root)
+    return entries
+
+
+@mcp.tool()
+def inspect_game_snapshot(max_entries: int = 2000, query: str = "") -> str:
+    """Return a bounded table of bridge snapshot paths, types, list sizes, and truncation markers."""
+    if not 1 <= max_entries <= 20_000:
+        raise ValueError("max_entries must be between 1 and 20000.")
+    snapshot_file, snapshot = _load_bridge_snapshot()
+    entries = _bridge_snapshot_index(snapshot, max_entries)
+    if query:
+        needle = query.casefold()
+        entries = [entry for entry in entries if needle in entry["path"].casefold()]
+    return json.dumps({
+        "path": str(snapshot_file), "profile": snapshot.get("profile"), "captured_at": snapshot.get("capturedAtUtc"),
+        "entry_count": len(entries), "truncated_index": len(entries) >= max_entries,
+        "entries": entries,
+    }, indent=2)
+
+
+@mcp.tool()
+def read_game_snapshot_path(path: str, max_characters: int = 60000) -> str:
+    """Read one exact, safe dot path from the latest bridge snapshot and remember it for this ExileAPI version."""
+    if not 1_000 <= max_characters <= 500_000:
+        raise ValueError("max_characters must be between 1000 and 500000.")
+    snapshot_file, snapshot = _load_bridge_snapshot()
+    value = _resolve_bridge_path(snapshot, path)
+    _remember_bridge_path(path, value, snapshot)
+    content = json.dumps(value, indent=2, ensure_ascii=False)
+    return json.dumps({
+        "path": path, "snapshot_file": str(snapshot_file), "profile": snapshot.get("profile"),
+        "content": content[:max_characters], "truncated": len(content) > max_characters,
+    }, indent=2)
+
+
+@mcp.tool()
+def list_known_game_snapshot_paths(query: str = "") -> str:
+    """List successful bridge snapshot paths remembered locally for the current ExileCore build."""
+    try:
+        history = json.loads(BRIDGE_CAPTURE_HISTORY.read_text(encoding="utf-8")) if BRIDGE_CAPTURE_HISTORY.is_file() else []
+    except json.JSONDecodeError:
+        history = []
+    version = _bridge_version_key()
+    entries = [item for item in history if item.get("version") == version]
+    if query:
+        entries = [item for item in entries if query.casefold() in str(item.get("path", "")).casefold()]
+    return json.dumps({"version": version, "history_path": str(BRIDGE_CAPTURE_HISTORY), "paths": entries}, indent=2)
     return json.dumps(
         {
             "path": str(status_file),

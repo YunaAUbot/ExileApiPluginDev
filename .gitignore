@@ -12,4 +12,5 @@ Errors.txt
 runtime-status.json
 game-snapshot.json
 capture-request.json
+capture-path-history.json
 .snapshot-index/
