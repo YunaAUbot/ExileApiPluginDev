@@ -155,6 +155,11 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         if (budget-- <= 0) return new Dictionary<string, object> { ["_truncated"] = "node_limit" };
         var type = value.GetType();
         if (value is string text) return text.Length <= Settings.SnapshotMaxStringLength.Value ? text : text[..Settings.SnapshotMaxStringLength.Value] + "…";
+        // Native addresses are neither portable nor useful for the MCP.  More
+        // importantly, System.Text.Json intentionally refuses to serialize them.
+        if (value is IntPtr or UIntPtr) return "<native_pointer>";
+        if (value is Type runtimeType) return runtimeType.FullName ?? runtimeType.Name;
+        if (value is Delegate callback) return $"<delegate:{callback.Method.Name}>";
         if (type.IsPrimitive || value is decimal or DateTime or DateTimeOffset or Guid or TimeSpan || type.IsEnum) return value;
         if (depth >= Settings.SnapshotMaxDepth.Value) return new Dictionary<string, object> { ["_type"] = type.FullName, ["_truncated"] = "depth_limit" };
 
