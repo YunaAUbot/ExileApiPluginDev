@@ -43,6 +43,8 @@ public sealed class BridgeSettings : ISettings
     public TextNode CaptureRequestFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\capture-request.json");
     [Menu(null, "Allow a prepared MCP request to override the selected profile for this capture")]
     public ToggleNode UsePendingMcpCaptureRequest { get; set; } = new(false);
+    [Menu(null, "Poll once per second and automatically execute a prepared MCP capture request")]
+    public ToggleNode AutoCapturePendingMcpRequests { get; set; } = new(false);
     public RangeNode<int> SnapshotMaxDepth { get; set; } = new(6, 1, 10);
     public RangeNode<int> SnapshotMaxNodes { get; set; } = new(500, 50, 5000);
     public RangeNode<int> SnapshotMaxCollectionEntries { get; set; } = new(100, 1, 1000);
@@ -70,6 +72,8 @@ public sealed class BridgeSettings : ISettings
 
 public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
 {
+    private DateTime _nextAutoCaptureCheckUtc = DateTime.MinValue;
+
     private sealed class CapturePlan
     {
         public CapturePlan(string profile, IEnumerable<string> shortcuts, int maxDepth, int maxNodes, int maxCollectionEntries)
@@ -113,7 +117,17 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
 
     public override void Render()
     {
-        if (Settings.ConsumeCaptureRequest()) CaptureSnapshot();
+        if (Settings.ConsumeCaptureRequest())
+        {
+            CaptureSnapshot();
+            return;
+        }
+
+        if (!Settings.AutoCapturePendingMcpRequests.Value || DateTime.UtcNow < _nextAutoCaptureCheckUtc) return;
+        _nextAutoCaptureCheckUtc = DateTime.UtcNow.AddSeconds(1);
+        var requestPath = Settings.CaptureRequestFilePath.Value;
+        if (Settings.UsePendingMcpCaptureRequest.Value && !string.IsNullOrWhiteSpace(requestPath) && File.Exists(requestPath))
+            CaptureSnapshot();
     }
 
     private void WriteStatus(string state)

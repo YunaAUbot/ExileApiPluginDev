@@ -188,15 +188,17 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
         "Sections": sections,
         "preparedAtUtc": datetime.now(timezone.utc).isoformat(),
     }
-    BRIDGE_CAPTURE_REQUEST.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    temporary_request = BRIDGE_CAPTURE_REQUEST.with_suffix(".json.tmp")
+    temporary_request.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    temporary_request.replace(BRIDGE_CAPTURE_REQUEST)
     return json.dumps(
         {
             "request_path": str(BRIDGE_CAPTURE_REQUEST),
             "profile": matched_profile,
             "custom_sections": sections,
             "profile_description": BRIDGE_CAPTURE_PROFILES[matched_profile],
-            "safety": "The request only selects bounded, read-only export data. It is consumed only when the user presses Capture snapshot in the enabled bridge plugin.",
-            "next_step": "Enable UsePendingMcpCaptureRequest and press Capture snapshot in ExileAPI; the bridge removes this request after a successful export.",
+            "safety": "The request only selects bounded, read-only export data. It is consumed only after explicit bridge opt-in.",
+            "next_step": "Enable UsePendingMcpCaptureRequest, then either press Capture snapshot or enable AutoCapturePendingMcpRequests; the bridge removes this request after a successful export.",
         },
         indent=2,
     )
