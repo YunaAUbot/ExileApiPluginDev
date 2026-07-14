@@ -5,7 +5,7 @@ An MCP server that gives coding agents a bounded development workflow for ExileA
 ## Scope
 
 - Detect local ExileAPI compiler references.
-- Scaffold source-only C# plugin projects below `generated-plugins/`.
+- Create an independent Git repository under `~/ExileApiPlugins/<PluginName>` and link it into `Plugins/Source/<PluginName>`.
 - Prepare the linked source tree for ExileAPI's in-game **Build/Reload** action.
 - Read the resulting bounded `Errors.txt` output.
 
@@ -25,3 +25,5 @@ The repository is linked into ExileAPI source plugins at:
 
 ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button after source changes; no Linux build worker is required.
 `Errors.txt` may be retained after a successful build, so the MCP also reports its modification time.
+
+The enabled bridge writes a small read-only `runtime-status.json` after successful initialisation and area changes. Its default path matches the existing `Z:` mount used by ExileAPI on this machine; it can be changed in the plugin settings.

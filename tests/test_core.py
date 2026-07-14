@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from exileapi_plugin_dev.core import csharp_identifier, read_tail, scaffold_plugin, validate_plugin_name
+from exileapi_plugin_dev.core import csharp_identifier, create_plugin_workspace, read_tail, scaffold_plugin, validate_plugin_name
 
 
 class PluginScaffoldTests(unittest.TestCase):
@@ -26,6 +26,14 @@ class PluginScaffoldTests(unittest.TestCase):
             log = Path(temporary_directory) / "Errors.txt"
             log.write_text("one\ntwo\nthree\n")
             self.assertEqual(read_tail(log, 2), "two\nthree")
+
+    def test_workspace_is_a_git_repo_linked_into_exileapi_source(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            result = create_plugin_workspace(root / "workspaces", root / "source", "ExamplePlugin", "Example")
+            self.assertTrue((Path(result["workspace"]) / ".git").is_dir())
+            self.assertTrue(Path(result["source_link"]).is_symlink())
+            self.assertEqual(Path(result["source_link"]).resolve(), Path(result["workspace"]))
 
 
 if __name__ == "__main__":
