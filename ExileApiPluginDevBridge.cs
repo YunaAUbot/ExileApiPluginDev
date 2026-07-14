@@ -101,6 +101,9 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
     private static readonly HashSet<string> ExcludedProperties = new(StringComparer.Ordinal)
     {
         "Address", "M", "TheGame", "CoreSettings", "Cache", "pCache", "pM", "pTheGame", "OwnerAddress",
+        // These Element links form large cyclic UI graphs and hide useful scalar
+        // state such as Text behind the traversal budget.
+        "Root", "Parent", "GetClientRectCache",
     };
 
     public override bool Initialise()
@@ -353,7 +356,9 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         }
 
         var result = new Dictionary<string, object> { ["_type"] = type.FullName };
-        foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public).Take(80))
+        foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                     .OrderBy(property => IsSimpleType(property.PropertyType) ? 0 : 1)
+                     .Take(80))
         {
             if (!property.CanRead || property.GetIndexParameters().Length != 0 || ExcludedProperties.Contains(property.Name)) continue;
             try
@@ -366,6 +371,14 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             }
         }
         return result;
+    }
+
+    private static bool IsSimpleType(Type type)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        return type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal)
+            || type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(Guid)
+            || type == typeof(TimeSpan) || type == typeof(IntPtr) || type == typeof(UIntPtr);
     }
 
     private static void WriteJsonAtomically(string path, object content)
