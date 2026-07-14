@@ -251,11 +251,12 @@ def refine_game_snapshot_capture(max_targets: int = 4) -> str:
         # itself (e.g. CurrencyExchangePanel) is deliberately excluded from the
         # keyword check so it cannot make every descendant look equally relevant.
         suffix = path.split(".", 2)[-1].casefold()
-        relevant = ("order", "offer", "wanted", "stock", "market", "rate", "currency", "item")
-        noisy = ("root", "parent", "childhash", "pathfromroot", "getclientrectcache", "position", "scrolloffset", "issaturated", "isvalid")
+        leaf = path.rsplit(".", 1)[-1].casefold()
+        relevant = ("text", "order", "offer", "wanted", "stock", "market", "rate", "currency", "item", "count")
+        noisy = ("root", "parent", "childhash", "pathfromroot", "getclientrectcache", "position", "scrolloffset", "issaturated", "isvalid", "bgcolor", "bordcolor", "center", "children")
         depth = path.count(".")
-        relevance_penalty = 0 if any(term in suffix for term in relevant) else 100
-        noise_penalty = 100 if any(term in suffix for term in noisy) else 0
+        relevance_penalty = 0 if any(term in leaf for term in relevant) else 100
+        noise_penalty = 200 if any(term in leaf for term in noisy) else 0
         return relevance_penalty + noise_penalty + depth * 5, depth, path
 
     paths = sorted(set(candidates), key=target_score)[:max_targets]
