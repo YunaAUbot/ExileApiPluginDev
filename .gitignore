@@ -13,4 +13,5 @@ runtime-status.json
 game-snapshot.json
 capture-request.json
 capture-path-history.json
+capture-path-profiles.json
 .snapshot-index/

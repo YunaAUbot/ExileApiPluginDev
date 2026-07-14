@@ -96,6 +96,13 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
     {
         public string Profile { get; set; }
         public string[] Sections { get; set; }
+        public CaptureCondition[] Conditions { get; set; }
+    }
+
+    private sealed class CaptureCondition
+    {
+        public string Path { get; set; }
+        public string Equals { get; set; }
     }
 
     private static readonly HashSet<string> ExcludedProperties = new(StringComparer.Ordinal)
@@ -182,6 +189,11 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             };
             var requestPath = Settings.CaptureRequestFilePath.Value;
             var request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
+            if (request?.Conditions?.Length > 0 && !ConditionsMatch(roots, request.Conditions))
+            {
+                WriteStatus("capture_waiting_for_condition");
+                return;
+            }
             var profile = request?.Profile ?? GetSelectedCaptureProfile();
             var plan = CreateCapturePlan(profile, request?.Sections ?? ParseShortcuts(Settings.CustomSnapshotShortcuts.Value), roots.Keys);
             var capturedRoots = new Dictionary<string, object>();
@@ -311,6 +323,18 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             value = property.GetValue(value);
         }
         return value;
+    }
+
+    private static bool ConditionsMatch(IReadOnlyDictionary<string, object> roots, IEnumerable<CaptureCondition> conditions)
+    {
+        foreach (var condition in conditions)
+        {
+            if (string.IsNullOrWhiteSpace(condition?.Path) || condition.Equals == null)
+                throw new InvalidOperationException("Every capture condition needs Path and Equals.");
+            var actual = ResolveTarget(roots, condition.Path);
+            if (!string.Equals(actual?.ToString(), condition.Equals, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
     }
 
     private static object ReadPublicProperty(object instance, string propertyName)

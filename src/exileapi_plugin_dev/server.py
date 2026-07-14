@@ -26,6 +26,7 @@ SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
 SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"
 BRIDGE_CAPTURE_REQUEST = SERVER_ROOT / "capture-request.json"
 BRIDGE_CAPTURE_HISTORY = SERVER_ROOT / "capture-path-history.json"
+BRIDGE_PATH_PROFILES = SERVER_ROOT / "capture-path-profiles.json"
 BRIDGE_CAPTURE_PROFILES = {
     "Overview": "All DevTree shortcuts with the bridge's configured limits.",
     "Player": "Player only; depth 8, 5,000 nodes, 500 collection entries.",
@@ -298,7 +299,9 @@ def read_game_snapshot(section: str | None = None, max_characters: int = 60000) 
 
 
 @mcp.tool()
-def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | None = None) -> str:
+def prepare_game_snapshot_capture(
+    profile: str, custom_sections: list[str] | None = None, conditions: list[dict[str, str]] | None = None
+) -> str:
     """Prepare a bounded bridge capture profile; the user must still press Capture snapshot in-game."""
     matched_profile = next((name for name in BRIDGE_CAPTURE_PROFILES if name.casefold() == profile.strip().casefold()), None)
     if not matched_profile:
@@ -312,10 +315,17 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
             raise ValueError(f"Unknown or unsafe DevTree target paths: {', '.join(invalid)}")
     elif sections:
         raise ValueError("custom_sections is allowed only with the Custom profile.")
+    normalized_conditions = conditions or []
+    for condition in normalized_conditions:
+        if set(condition) != {"path", "equals"} or not _is_allowed_bridge_target(condition["path"]):
+            raise ValueError("Each condition must contain exactly safe 'path' and 'equals' string values.")
+        if not isinstance(condition["equals"], str):
+            raise ValueError("Condition equals values must be strings.")
     request = {
         "schemaVersion": 1,
         "Profile": matched_profile,
         "Sections": sections,
+        "Conditions": [{"Path": item["path"], "Equals": item["equals"]} for item in normalized_conditions],
         "preparedAtUtc": datetime.now(timezone.utc).isoformat(),
     }
     temporary_request = BRIDGE_CAPTURE_REQUEST.with_suffix(".json.tmp")
@@ -326,12 +336,57 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
             "request_path": str(BRIDGE_CAPTURE_REQUEST),
             "profile": matched_profile,
             "custom_sections": sections,
+            "conditions": normalized_conditions,
             "profile_description": BRIDGE_CAPTURE_PROFILES[matched_profile],
             "safety": "The request only selects bounded, read-only export data. It is consumed only after explicit bridge opt-in.",
             "next_step": "Enable UsePendingMcpCaptureRequest, then either press Capture snapshot or enable AutoCapturePendingMcpRequests; the bridge removes this request after a successful export.",
         },
         indent=2,
     )
+
+
+def _load_path_profiles() -> list[dict[str, object]]:
+    try:
+        profiles = json.loads(BRIDGE_PATH_PROFILES.read_text(encoding="utf-8")) if BRIDGE_PATH_PROFILES.is_file() else []
+        return profiles if isinstance(profiles, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+@mcp.tool()
+def save_game_snapshot_path_profile(name: str, paths: list[str] | None = None) -> str:
+    """Save safe target paths from the latest snapshot as a reusable profile for the current ExileCore build."""
+    normalized_name = name.strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 _-]{0,63}", normalized_name):
+        raise ValueError("name must be 1-64 letters, numbers, spaces, underscores, or hyphens.")
+    _, snapshot = _load_bridge_snapshot()
+    selected_paths = list(dict.fromkeys(paths or list(snapshot.get("shortcuts", {}))))
+    if not selected_paths or any(not _is_allowed_bridge_target(path) for path in selected_paths):
+        raise ValueError("paths must contain one or more safe snapshot paths.")
+    version = _bridge_version_key()
+    profile = {"version": version, "name": normalized_name, "paths": selected_paths, "source_profile": snapshot.get("profile"), "saved_at": datetime.now(timezone.utc).isoformat()}
+    profiles = [item for item in _load_path_profiles() if not (item.get("version") == version and item.get("name") == normalized_name)]
+    profiles.append(profile)
+    BRIDGE_PATH_PROFILES.write_text(json.dumps(profiles[-200:], indent=2) + "\n", encoding="utf-8")
+    return json.dumps(profile, indent=2)
+
+
+@mcp.tool()
+def list_game_snapshot_path_profiles() -> str:
+    """List reusable target-path profiles saved for the current ExileCore build."""
+    version = _bridge_version_key()
+    profiles = [item for item in _load_path_profiles() if item.get("version") == version]
+    return json.dumps({"version": version, "profiles_path": str(BRIDGE_PATH_PROFILES), "profiles": profiles}, indent=2)
+
+
+@mcp.tool()
+def prepare_game_snapshot_path_profile(name: str, conditions: list[dict[str, str]] | None = None) -> str:
+    """Prepare a deep targeted capture from a saved path profile, optionally waiting for simple bridge conditions."""
+    version = _bridge_version_key()
+    profile = next((item for item in _load_path_profiles() if item.get("version") == version and item.get("name") == name), None)
+    if profile is None:
+        raise ValueError(f"No saved profile named {name!r} for the current ExileCore build.")
+    return prepare_game_snapshot_capture("Targeted", list(profile["paths"]), conditions)
 
 
 def _is_allowed_bridge_target(target: str) -> bool:
