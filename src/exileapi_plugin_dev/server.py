@@ -30,12 +30,14 @@ BRIDGE_CAPTURE_PROFILES = {
     "PlayerInventory": "PlayerInventory and PlayerInventory.Items; depth 10, 5,000 nodes, 1,000 collection entries.",
     "UIHover": "UIHover only; depth 10, 3,000 nodes, 1,000 collection entries.",
     "IngameUI": "IngameUI only; depth 8, 5,000 nodes, 500 collection entries.",
+    "CurrencyExchange": "CurrencyExchangePanel plus related server data; depth 12, 5,000 nodes, 1,000 collection entries.",
     "Custom": "Only supplied shortcut names, with the bridge's configured limits.",
 }
 BRIDGE_SHORTCUTS = {
     "GameController", "TheGame", "Player", "IngameState", "IngameUI",
     "IngameState.Data", "IngameState.Data.ServerData", "PlayerInventory",
-    "PlayerInventory.Items", "ItemsOnGroundLabels", "UIHover",
+    "PlayerInventory.Items", "ItemsOnGroundLabels", "UIHover", "IngameUI.CurrencyExchangePanel",
+    "IngameState.Data.ServerData.CurrencyExchange", "IngameState.Data.ServerData.CurrencyExchangeCategories",
 }
 
 mcp = FastMCP(

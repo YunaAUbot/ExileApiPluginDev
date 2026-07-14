@@ -34,6 +34,8 @@ public sealed class BridgeSettings : ISettings
     [Menu(null, "Select exactly one capture profile")]
     public ToggleNode CaptureIngameUIProfile { get; set; } = new(false);
     [Menu(null, "Select exactly one capture profile")]
+    public ToggleNode CaptureCurrencyExchangeProfile { get; set; } = new(false);
+    [Menu(null, "Select exactly one capture profile")]
     public ToggleNode CaptureCustomProfile { get; set; } = new(false);
     [Menu(null, "Only used by Custom; comma-separated DevTree shortcuts")]
     public TextNode CustomSnapshotShortcuts { get; set; } = new TextNode("PlayerInventory.Items");
@@ -142,19 +144,24 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         try
         {
             var inventory = GameController.IngameState.Data.ServerData.PlayerInventories.FirstOrDefault()?.Inventory;
+            var ingameUi = GameController.IngameState.IngameUi;
+            var serverData = GameController.IngameState.Data.ServerData;
             var roots = new Dictionary<string, object>
             {
                 ["GameController"] = GameController,
                 ["TheGame"] = GameController.Game,
                 ["Player"] = GameController.Player,
                 ["IngameState"] = GameController.IngameState,
-                ["IngameUI"] = GameController.IngameState.IngameUi,
+                ["IngameUI"] = ingameUi,
                 ["IngameState.Data"] = GameController.IngameState.Data,
-                ["IngameState.Data.ServerData"] = GameController.IngameState.Data.ServerData,
+                ["IngameState.Data.ServerData"] = serverData,
                 ["PlayerInventory"] = inventory,
                 ["PlayerInventory.Items"] = inventory?.Items,
                 ["ItemsOnGroundLabels"] = GameController.IngameState.IngameUi.ItemsOnGroundLabels,
                 ["UIHover"] = GameController.IngameState.UIHover,
+                ["IngameUI.CurrencyExchangePanel"] = ReadPublicProperty(ingameUi, "CurrencyExchangePanel"),
+                ["IngameState.Data.ServerData.CurrencyExchange"] = ReadPublicProperty(serverData, "CurrencyExchange"),
+                ["IngameState.Data.ServerData.CurrencyExchangeCategories"] = ReadPublicProperty(serverData, "CurrencyExchangeCategories"),
             };
             var requestPath = Settings.CaptureRequestFilePath.Value;
             var request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
@@ -211,6 +218,12 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             "playerinventory" => new[] { "PlayerInventory", "PlayerInventory.Items" },
             "uihover" => new[] { "UIHover" },
             "ingameui" => new[] { "IngameUI" },
+            "currencyexchange" => new[]
+            {
+                "IngameUI.CurrencyExchangePanel",
+                "IngameState.Data.ServerData.CurrencyExchange",
+                "IngameState.Data.ServerData.CurrencyExchangeCategories",
+            },
             "custom" => customShortcuts,
             _ => throw new InvalidOperationException($"Unknown capture profile: {normalized}"),
         };
@@ -223,6 +236,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             "playerinventory" => new CapturePlan("PlayerInventory", selected, 10, 5000, 1000),
             "uihover" => new CapturePlan("UIHover", selected, 10, 3000, 1000),
             "ingameui" => new CapturePlan("IngameUI", selected, 8, 5000, 500),
+            "currencyexchange" => new CapturePlan("CurrencyExchange", selected, 12, 5000, 1000),
             "custom" => new CapturePlan("Custom", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
             _ => new CapturePlan("Overview", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
         };
@@ -236,6 +250,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         if (Settings.CapturePlayerInventoryProfile.Value) selected.Add("PlayerInventory");
         if (Settings.CaptureUIHoverProfile.Value) selected.Add("UIHover");
         if (Settings.CaptureIngameUIProfile.Value) selected.Add("IngameUI");
+        if (Settings.CaptureCurrencyExchangeProfile.Value) selected.Add("CurrencyExchange");
         if (Settings.CaptureCustomProfile.Value) selected.Add("Custom");
         if (selected.Count != 1)
             throw new InvalidOperationException("Select exactly one capture profile checkbox.");
@@ -251,6 +266,18 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
         return JsonSerializer.Deserialize<CaptureRequest>(File.ReadAllText(path));
+    }
+
+    private static object ReadPublicProperty(object instance, string propertyName)
+    {
+        try
+        {
+            return instance?.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)?.GetValue(instance);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private object SnapshotValue(object value, int depth, ref int budget, int maxDepth, int maxCollectionEntries)
