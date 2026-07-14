@@ -23,6 +23,20 @@ DEFAULT_EXILEAPI_ROOT = Path.home() / "ExileApi-Compiled"
 WORKSPACE_ROOT = Path.home() / "ExileApiPlugins"
 SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
 SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"
+BRIDGE_CAPTURE_REQUEST = SERVER_ROOT / "capture-request.json"
+BRIDGE_CAPTURE_PROFILES = {
+    "Overview": "All DevTree shortcuts with the bridge's configured limits.",
+    "Player": "Player only; depth 8, 5,000 nodes, 500 collection entries.",
+    "PlayerInventory": "PlayerInventory and PlayerInventory.Items; depth 10, 5,000 nodes, 1,000 collection entries.",
+    "UIHover": "UIHover only; depth 10, 3,000 nodes, 1,000 collection entries.",
+    "IngameUI": "IngameUI only; depth 8, 5,000 nodes, 500 collection entries.",
+    "Custom": "Only supplied shortcut names, with the bridge's configured limits.",
+}
+BRIDGE_SHORTCUTS = {
+    "GameController", "TheGame", "Player", "IngameState", "IngameUI",
+    "IngameState.Data", "IngameState.Data.ServerData", "PlayerInventory",
+    "PlayerInventory.Items", "ItemsOnGroundLabels", "UIHover",
+}
 
 mcp = FastMCP(
     "ExileAPI Plugin Development",
@@ -149,6 +163,43 @@ def read_game_snapshot(section: str | None = None, max_characters: int = 60000) 
         },
         indent=2,
     )
+
+
+@mcp.tool()
+def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | None = None) -> str:
+    """Prepare a bounded bridge capture profile; the user must still press Capture snapshot in-game."""
+    matched_profile = next((name for name in BRIDGE_CAPTURE_PROFILES if name.casefold() == profile.strip().casefold()), None)
+    if not matched_profile:
+        raise ValueError(f"Unknown profile. Available profiles: {', '.join(BRIDGE_CAPTURE_PROFILES)}")
+    sections = list(dict.fromkeys(custom_sections or []))
+    if matched_profile == "Custom":
+        if not sections:
+            raise ValueError("Custom requires at least one custom_sections entry.")
+        invalid = sorted(set(sections) - BRIDGE_SHORTCUTS)
+        if invalid:
+            raise ValueError(f"Unknown DevTree shortcuts: {', '.join(invalid)}")
+    elif sections:
+        raise ValueError("custom_sections is allowed only with the Custom profile.")
+    request = {
+        "schemaVersion": 1,
+        "Profile": matched_profile,
+        "Sections": sections,
+        "preparedAtUtc": datetime.now(timezone.utc).isoformat(),
+    }
+    BRIDGE_CAPTURE_REQUEST.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    return json.dumps(
+        {
+            "request_path": str(BRIDGE_CAPTURE_REQUEST),
+            "profile": matched_profile,
+            "custom_sections": sections,
+            "profile_description": BRIDGE_CAPTURE_PROFILES[matched_profile],
+            "safety": "The request only selects bounded, read-only export data. It is consumed only when the user presses Capture snapshot in the enabled bridge plugin.",
+            "next_step": "Press Capture snapshot in ExileAPI; the bridge removes this request after a successful export.",
+        },
+        indent=2,
+    )
+
+
 @mcp.tool()
 def find_plugin_examples(query: str, max_results: int = 20) -> str:
     """Find relevant local ExileAPI C# examples and return the exApiTools plugin catalogue link."""
