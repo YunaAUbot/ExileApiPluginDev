@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "exileapi-plugin-dev"
+version = "0.1.0"
+description = "Safe MCP development tools for ExileAPI plugins"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.0,<2.0"]
+
+[project.scripts]
+exileapi-plugin-dev = "exileapi_plugin_dev.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/exileapi_plugin_dev"]
+
