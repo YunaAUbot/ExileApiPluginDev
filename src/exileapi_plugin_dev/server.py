@@ -11,6 +11,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from mcp.server.fastmcp import FastMCP
 
@@ -31,6 +32,7 @@ BRIDGE_CAPTURE_PROFILES = {
     "UIHover": "UIHover only; depth 10, 3,000 nodes, 1,000 collection entries.",
     "IngameUI": "IngameUI only; depth 8, 5,000 nodes, 500 collection entries.",
     "CurrencyExchange": "CurrencyExchangePanel plus related server data; depth 12, 5,000 nodes, 1,000 collection entries.",
+    "Targeted": "MCP-only paths discovered as truncated; depth 12, 5,000 nodes, 1,000 collection entries per path.",
     "Custom": "Only supplied shortcut names, with the bridge's configured limits.",
 }
 BRIDGE_SHORTCUTS = {
@@ -174,12 +176,12 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
     if not matched_profile:
         raise ValueError(f"Unknown profile. Available profiles: {', '.join(BRIDGE_CAPTURE_PROFILES)}")
     sections = list(dict.fromkeys(custom_sections or []))
-    if matched_profile == "Custom":
+    if matched_profile in {"Custom", "Targeted"}:
         if not sections:
-            raise ValueError("Custom requires at least one custom_sections entry.")
-        invalid = sorted(set(sections) - BRIDGE_SHORTCUTS)
+            raise ValueError(f"{matched_profile} requires at least one custom_sections entry.")
+        invalid = sorted(section for section in sections if not _is_allowed_bridge_target(section))
         if invalid:
-            raise ValueError(f"Unknown DevTree shortcuts: {', '.join(invalid)}")
+            raise ValueError(f"Unknown or unsafe DevTree target paths: {', '.join(invalid)}")
     elif sections:
         raise ValueError("custom_sections is allowed only with the Custom profile.")
     request = {
@@ -202,6 +204,74 @@ def prepare_game_snapshot_capture(profile: str, custom_sections: list[str] | Non
         },
         indent=2,
     )
+
+
+def _is_allowed_bridge_target(target: str) -> bool:
+    root = next((item for item in sorted(BRIDGE_SHORTCUTS, key=len, reverse=True) if target == item or target.startswith(item + ".")), None)
+    if root is None:
+        return False
+    suffix = target[len(root):].lstrip(".")
+    return not suffix or all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", segment) for segment in suffix.split("."))
+
+
+@mcp.tool()
+def refine_game_snapshot_capture(max_targets: int = 4) -> str:
+    """Find node-limited paths in the latest bridge snapshot and prepare a deep, targeted follow-up capture."""
+    if not 1 <= max_targets <= 20:
+        raise ValueError("max_targets must be between 1 and 20.")
+    snapshot_file = SERVER_ROOT / "game-snapshot.json"
+    if not snapshot_file.is_file():
+        raise ValueError("No bridge snapshot exists. Capture an overview or discovery profile first.")
+    try:
+        snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Latest bridge snapshot is invalid JSON: {error.msg}") from error
+
+    candidates: list[str] = []
+
+    def visit(value: object, path: str) -> None:
+        if len(candidates) >= 500:
+            return
+        if isinstance(value, dict):
+            if value.get("_truncated") == "node_limit" and _is_allowed_bridge_target(path):
+                candidates.append(path)
+                return
+            for name, child in value.items():
+                if name.startswith("_"):
+                    continue
+                visit(child, f"{path}.{name}")
+        elif isinstance(value, list):
+            # Collection indexes are intentionally not supported as target paths.
+            return
+
+    for root, value in snapshot.get("shortcuts", {}).items():
+        visit(value, root)
+    def target_score(path: str) -> tuple[int, int, str]:
+        # Prefer shallow domain data over repeated Element geometry.  The root name
+        # itself (e.g. CurrencyExchangePanel) is deliberately excluded from the
+        # keyword check so it cannot make every descendant look equally relevant.
+        suffix = path.split(".", 2)[-1].casefold()
+        relevant = ("order", "offer", "wanted", "stock", "market", "rate", "currency", "item")
+        noisy = ("root", "parent", "childhash", "pathfromroot", "getclientrectcache", "position", "scrolloffset", "issaturated", "isvalid")
+        depth = path.count(".")
+        relevance_penalty = 0 if any(term in suffix for term in relevant) else 100
+        noise_penalty = 100 if any(term in suffix for term in noisy) else 0
+        return relevance_penalty + noise_penalty + depth * 5, depth, path
+
+    paths = sorted(set(candidates), key=target_score)[:max_targets]
+    if not paths:
+        return json.dumps(
+            {
+                "prepared": False,
+                "reason": "No node-limited, safely addressable property paths found in the latest snapshot.",
+                "profile": snapshot.get("profile"),
+            },
+            indent=2,
+        )
+    prepared = json.loads(prepare_game_snapshot_capture("Targeted", paths))
+    prepared["discovered_from_profile"] = snapshot.get("profile")
+    prepared["discovered_targets"] = paths
+    return json.dumps(prepared, indent=2)
 
 
 @mcp.tool()

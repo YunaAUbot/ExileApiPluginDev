@@ -186,7 +186,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             foreach (var shortcut in plan.Shortcuts)
             {
                 var budget = plan.MaxNodes;
-                capturedRoots[shortcut] = SnapshotValue(roots[shortcut], 0, ref budget, plan.MaxDepth, plan.MaxCollectionEntries);
+                capturedRoots[shortcut] = SnapshotValue(ResolveTarget(roots, shortcut), 0, ref budget, plan.MaxDepth, plan.MaxCollectionEntries);
                 remainingBudgets[shortcut] = Math.Max(0, budget);
             }
             var snapshot = new
@@ -238,10 +238,10 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 "IngameState.Data.ServerData.CurrencyExchange",
                 "IngameState.Data.ServerData.CurrencyExchangeCategories",
             },
-            "custom" => customShortcuts,
+            "custom" or "targeted" => customShortcuts,
             _ => throw new InvalidOperationException($"Unknown capture profile: {normalized}"),
         };
-        var invalid = selected.Where(shortcut => !availableShortcuts.Contains(shortcut)).ToArray();
+        var invalid = selected.Where(shortcut => !IsAllowedTarget(availableShortcuts, shortcut)).ToArray();
         if (invalid.Length > 0) throw new InvalidOperationException($"Unknown DevTree shortcut(s): {string.Join(", ", invalid)}");
         if (selected.Length == 0) throw new InvalidOperationException("The capture profile selected no shortcuts.");
         return normalized.ToLowerInvariant() switch
@@ -251,6 +251,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             "uihover" => new CapturePlan("UIHover", selected, 10, 3000, 1000),
             "ingameui" => new CapturePlan("IngameUI", selected, 8, 5000, 500),
             "currencyexchange" => new CapturePlan("CurrencyExchange", selected, 12, 5000, 1000),
+            "targeted" => new CapturePlan("Targeted", selected, 12, 5000, 1000),
             "custom" => new CapturePlan("Custom", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
             _ => new CapturePlan("Overview", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
         };
@@ -280,6 +281,33 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
         return JsonSerializer.Deserialize<CaptureRequest>(File.ReadAllText(path));
+    }
+
+    private static bool IsAllowedTarget(ICollection<string> roots, string target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return false;
+        var root = roots.OrderByDescending(name => name.Length)
+            .FirstOrDefault(name => target == name || target.StartsWith(name + ".", StringComparison.Ordinal));
+        if (root == null) return false;
+        return target[root.Length..].Split('.', StringSplitOptions.RemoveEmptyEntries)
+            .All(segment => segment.All(character => char.IsLetterOrDigit(character) || character == '_'));
+    }
+
+    private static object ResolveTarget(IReadOnlyDictionary<string, object> roots, string target)
+    {
+        var root = roots.Keys.OrderByDescending(name => name.Length)
+            .FirstOrDefault(name => target == name || target.StartsWith(name + ".", StringComparison.Ordinal));
+        if (root == null) throw new InvalidOperationException($"Unknown DevTree shortcut: {target}");
+        object value = roots[root];
+        foreach (var segment in target[root.Length..].Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (value == null) return null;
+            var property = value.GetType().GetProperty(segment, BindingFlags.Instance | BindingFlags.Public);
+            if (property == null || !property.CanRead || property.GetIndexParameters().Length != 0)
+                throw new InvalidOperationException($"Target path cannot read '{segment}' in {target}");
+            value = property.GetValue(value);
+        }
+        return value;
     }
 
     private static object ReadPublicProperty(object instance, string propertyName)
