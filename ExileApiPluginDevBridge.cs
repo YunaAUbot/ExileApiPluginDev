@@ -139,7 +139,13 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         }
         catch (Exception exception)
         {
-            WriteStatus($"snapshot_failed:{exception.GetType().Name}");
+            // Keep a bounded diagnostic in the status file.  A reflection export must
+            // fail visibly, but it must never disrupt ExileAPI's render loop.
+            var detail = exception.Message
+                .Replace('\r', ' ')
+                .Replace('\n', ' ');
+            if (detail.Length > 300) detail = detail[..300];
+            WriteStatus($"snapshot_failed:{exception.GetType().Name}:{detail}");
         }
     }
 
