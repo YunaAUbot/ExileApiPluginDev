@@ -24,3 +24,4 @@ The repository is linked into ExileAPI source plugins at:
 `~/ExileApi-Compiled/Plugins/Source/ExileApiPluginDev -> ~/ExileApiPluginDev`
 
 ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button after source changes; no Linux build worker is required.
+`Errors.txt` may be retained after a successful build, so the MCP also reports its modification time.

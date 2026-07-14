@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from exileapi_plugin_dev.core import read_tail, scaffold_plugin as write_plugin_scaffold
 
-SERVER_ROOT = Path(__file__).resolve().parents[3]
+# server.py -> exileapi_plugin_dev -> src -> repository root
+SERVER_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EXILEAPI_ROOT = Path.home() / "ExileApi-Compiled"
 GENERATED_ROOT = SERVER_ROOT / "generated-plugins"
 
@@ -82,11 +84,16 @@ def prepare_reload() -> str:
 def read_last_build_errors(max_lines: int = 200) -> str:
     """Read the newest bounded portion of ExileAPI's Errors.txt after an in-game build."""
     error_log = SERVER_ROOT / "Errors.txt"
+    modified_at = (
+        datetime.fromtimestamp(error_log.stat().st_mtime, timezone.utc).isoformat() if error_log.is_file() else None
+    )
     return json.dumps(
         {
             "path": str(error_log),
             "exists": error_log.is_file(),
+            "modified_at": modified_at,
             "content": read_tail(error_log, max_lines),
+            "note": "Errors.txt can remain unchanged after a successful ExileAPI build; compare modified_at with the last Build/Reload time.",
         },
         indent=2,
     )
