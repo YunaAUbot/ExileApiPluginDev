@@ -8,6 +8,7 @@ C# evaluator, or modify compiled-plugin directories.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,18 @@ from exileapi_plugin_dev.snapshot_archive import filter_entries, load_or_build_i
 
 # server.py -> exileapi_plugin_dev -> src -> repository root
 SERVER_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_EXILEAPI_ROOT = Path.home() / "ExileApi-Compiled"
+def _discover_exileapi_root() -> Path:
+    """Locate ExileAPI without coupling the MCP to one home-directory layout."""
+    configured = Path(os.environ["EXILEAPI_ROOT"]).expanduser() if os.environ.get("EXILEAPI_ROOT") else None
+    candidates = [configured] if configured else []
+    candidates.extend(sorted(Path.home().glob("*ExileApi*")))
+    for candidate in candidates:
+        if candidate and (candidate / "ExileCore.dll").is_file() and (candidate / "GameOffsets.dll").is_file():
+            return candidate.resolve()
+    return (Path.home() / "ExileApi-Compiled").resolve()
+
+
+DEFAULT_EXILEAPI_ROOT = _discover_exileapi_root()
 WORKSPACE_ROOT = Path.home() / "ExileApiPlugins"
 SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
 SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"

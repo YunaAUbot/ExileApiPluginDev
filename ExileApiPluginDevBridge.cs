@@ -21,6 +21,8 @@ namespace ExileApiPluginDevBridge;
 public sealed class BridgeSettings : ISettings
 {
     public ToggleNode Enable { get; set; } = new(true);
+    [Menu(null, "Derive bridge files from the Plugins/Source symlink; disable only for a manual location")]
+    public ToggleNode UseAutoPathDiscovery { get; set; } = new(true);
     public TextNode StatusFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\runtime-status.json");
     public TextNode SnapshotFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\game-snapshot.json");
     [Menu(null, "Select exactly one capture profile")]
@@ -135,7 +137,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
 
         if (!Settings.AutoCapturePendingMcpRequests.Value || DateTime.UtcNow < _nextAutoCaptureCheckUtc) return;
         _nextAutoCaptureCheckUtc = DateTime.UtcNow.AddSeconds(1);
-        var requestPath = Settings.CaptureRequestFilePath.Value;
+        var requestPath = ResolveBridgeFile(Settings.CaptureRequestFilePath.Value, "capture-request.json");
         if (Settings.UsePendingMcpCaptureRequest.Value && !string.IsNullOrWhiteSpace(requestPath) && File.Exists(requestPath))
             CaptureSnapshot();
     }
@@ -144,7 +146,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
     {
         try
         {
-            var path = Settings.StatusFilePath.Value;
+            var path = ResolveBridgeFile(Settings.StatusFilePath.Value, "runtime-status.json");
             if (string.IsNullOrWhiteSpace(path)) return;
             var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
@@ -187,7 +189,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 ["IngameState.Data.ServerData.CurrencyExchange"] = ReadPublicProperty(serverData, "CurrencyExchange"),
                 ["IngameState.Data.ServerData.CurrencyExchangeCategories"] = ReadPublicProperty(serverData, "CurrencyExchangeCategories"),
             };
-            var requestPath = Settings.CaptureRequestFilePath.Value;
+            var requestPath = ResolveBridgeFile(Settings.CaptureRequestFilePath.Value, "capture-request.json");
             var request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
             if (request?.Conditions?.Length > 0 && !ConditionsMatch(roots, request.Conditions))
             {
@@ -221,7 +223,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 remainingNodeBudgetByShortcut = remainingBudgets,
                 shortcuts = capturedRoots,
             };
-            WriteJsonAtomically(Settings.SnapshotFilePath.Value, snapshot);
+            WriteJsonAtomically(ResolveBridgeFile(Settings.SnapshotFilePath.Value, "game-snapshot.json"), snapshot);
             if (request != null && !string.IsNullOrWhiteSpace(requestPath)) File.Delete(requestPath);
             WriteStatus($"snapshot_captured:{plan.Profile}");
         }
@@ -347,6 +349,28 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         {
             return null;
         }
+    }
+
+    private string ResolveBridgeFile(string configuredPath, string filename)
+    {
+        if (!Settings.UseAutoPathDiscovery.Value && !string.IsNullOrWhiteSpace(configuredPath)) return configuredPath;
+        try
+        {
+            var current = new DirectoryInfo(Path.GetDirectoryName(typeof(BridgePlugin).Assembly.Location) ?? string.Empty);
+            while (current.Parent != null && !string.Equals(current.Name, "Plugins", StringComparison.OrdinalIgnoreCase)) current = current.Parent;
+            if (string.Equals(current.Name, "Plugins", StringComparison.OrdinalIgnoreCase))
+            {
+                var source = new DirectoryInfo(Path.Combine(current.FullName, "Source", "ExileApiPluginDev"));
+                var target = source.ResolveLinkTarget(true);
+                if (target != null) return Path.Combine(target.FullName, filename);
+                if (source.Exists) return Path.Combine(source.FullName, filename);
+            }
+        }
+        catch
+        {
+            // Fall back to the configured path; the bridge must never break ExileAPI's render loop.
+        }
+        return string.IsNullOrWhiteSpace(configuredPath) ? filename : configuredPath;
     }
 
     private object SnapshotValue(object value, int depth, ref int budget, int maxDepth, int maxCollectionEntries)
