@@ -167,6 +167,8 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
 
     private void CaptureSnapshot()
     {
+        string requestPath = null;
+        CaptureRequest request = null;
         try
         {
             var inventory = GameController.IngameState.Data.ServerData.PlayerInventories.FirstOrDefault()?.Inventory;
@@ -189,8 +191,8 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 ["IngameState.Data.ServerData.CurrencyExchange"] = ReadPublicProperty(serverData, "CurrencyExchange"),
                 ["IngameState.Data.ServerData.CurrencyExchangeCategories"] = ReadPublicProperty(serverData, "CurrencyExchangeCategories"),
             };
-            var requestPath = ResolveBridgeFile(Settings.CaptureRequestFilePath.Value, "capture-request.json");
-            var request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
+            requestPath = ResolveBridgeFile(Settings.CaptureRequestFilePath.Value, "capture-request.json");
+            request = Settings.UsePendingMcpCaptureRequest.Value ? ReadCaptureRequest(requestPath) : null;
             if (request?.Conditions?.Length > 0 && !ConditionsMatch(roots, request.Conditions))
             {
                 WriteStatus("capture_waiting_for_condition");
@@ -229,6 +231,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         }
         catch (Exception exception)
         {
+            if (request != null && !string.IsNullOrWhiteSpace(requestPath)) QuarantineFailedRequest(requestPath);
             // Keep a bounded diagnostic in the status file.  A reflection export must
             // fail visibly, but it must never disrupt ExileAPI's render loop.
             var detail = exception.Message
@@ -236,6 +239,20 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 .Replace('\n', ' ');
             if (detail.Length > 300) detail = detail[..300];
             WriteStatus($"snapshot_failed:{exception.GetType().Name}:{detail}");
+        }
+    }
+
+    private static void QuarantineFailedRequest(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var failedPath = path + ".failed-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".json";
+            File.Move(path, failedPath, true);
+        }
+        catch
+        {
+            // A malformed or stale request must not affect ExileAPI's render loop.
         }
     }
 
