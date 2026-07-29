@@ -36,7 +36,19 @@ DEFAULT_EXILEAPI_ROOT = _discover_exileapi_root()
 WORKSPACE_ROOT = Path.home() / "ExileApiPlugins"
 SNAPSHOT_ROOT = DEFAULT_EXILEAPI_ROOT / "snapshots"
 SNAPSHOT_INDEX_ROOT = SERVER_ROOT / ".snapshot-index"
-BRIDGE_CAPTURE_REQUEST = SERVER_ROOT / "capture-request.json"
+
+
+def _bridge_runtime_root() -> Path:
+    """Mirror the bridge's source-link discovery for its runtime files."""
+    source = DEFAULT_EXILEAPI_ROOT / "Plugins" / "Source" / "ExileApiPluginDev"
+    try:
+        return source.resolve(strict=True)
+    except OSError:
+        return source
+
+
+BRIDGE_RUNTIME_ROOT = _bridge_runtime_root()
+BRIDGE_CAPTURE_REQUEST = BRIDGE_RUNTIME_ROOT / "capture-request.json"
 BRIDGE_CAPTURE_HISTORY = SERVER_ROOT / "capture-path-history.json"
 BRIDGE_PATH_PROFILES = SERVER_ROOT / "capture-path-profiles.json"
 BRIDGE_CAPTURE_PROFILES = {
@@ -138,14 +150,14 @@ def read_last_build_errors(max_lines: int = 200) -> str:
 @mcp.tool()
 def read_runtime_status() -> str:
     """Read the read-only status file written by the enabled ExileAPI bridge after Build/Reload."""
-    status_file = SERVER_ROOT / "runtime-status.json"
+    status_file = BRIDGE_RUNTIME_ROOT / "runtime-status.json"
     modified_at = (
         datetime.fromtimestamp(status_file.stat().st_mtime, timezone.utc).isoformat() if status_file.is_file() else None
     )
 
 
 def _load_bridge_snapshot() -> tuple[Path, dict[str, object]]:
-    snapshot_file = SERVER_ROOT / "game-snapshot.json"
+    snapshot_file = BRIDGE_RUNTIME_ROOT / "game-snapshot.json"
     if not snapshot_file.is_file():
         raise ValueError("No bridge snapshot exists. Capture a profile first.")
     try:
