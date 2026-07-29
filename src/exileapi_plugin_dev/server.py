@@ -154,6 +154,16 @@ def read_runtime_status() -> str:
     modified_at = (
         datetime.fromtimestamp(status_file.stat().st_mtime, timezone.utc).isoformat() if status_file.is_file() else None
     )
+    return json.dumps(
+        {
+            "path": str(status_file),
+            "exists": status_file.is_file(),
+            "modified_at": modified_at,
+            "content": read_tail(status_file, 200),
+            "expected": "Run ExileAPI Build/Reload with ExileAPI Plugin Dev Bridge enabled.",
+        },
+        indent=2,
+    )
 
 
 def _load_bridge_snapshot() -> tuple[Path, dict[str, object]]:
