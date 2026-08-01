@@ -59,6 +59,7 @@ BRIDGE_CAPTURE_PROFILES = {
     "IngameUI": "IngameUI only; depth 8, 5,000 nodes, 500 collection entries.",
     "CurrencyExchange": "CurrencyExchangePanel plus related server data; depth 12, 5,000 nodes, 1,000 collection entries.",
     "Targeted": "MCP-only paths discovered as truncated; depth 12, 5,000 nodes, 1,000 collection entries per path.",
+    "Discovery": "MCP-only shallow object map; depth 1, 500 public properties, 10,000 nodes per path.",
     "Custom": "Only supplied shortcut names, with the bridge's configured limits.",
 }
 BRIDGE_SHORTCUTS = {
@@ -341,14 +342,14 @@ def prepare_game_snapshot_capture(
     if not matched_profile:
         raise ValueError(f"Unknown profile. Available profiles: {', '.join(BRIDGE_CAPTURE_PROFILES)}")
     sections = list(dict.fromkeys(custom_sections or []))
-    if matched_profile in {"Custom", "Targeted"}:
+    if matched_profile in {"Custom", "Targeted", "Discovery"}:
         if not sections:
             raise ValueError(f"{matched_profile} requires at least one custom_sections entry.")
         invalid = sorted(section for section in sections if not _is_allowed_bridge_target(section))
         if invalid:
             raise ValueError(f"Unknown or unsafe DevTree target paths: {', '.join(invalid)}")
     elif sections:
-        raise ValueError("custom_sections is allowed only with the Custom profile.")
+        raise ValueError("custom_sections is allowed only with Custom, Targeted, or Discovery.")
     normalized_conditions = conditions or []
     for condition in normalized_conditions:
         if set(condition) != {"path", "equals"} or not _is_allowed_bridge_target(condition["path"]):
@@ -432,8 +433,14 @@ def _is_allowed_bridge_target(target: str) -> bool:
 
 
 @mcp.tool()
+def prepare_game_snapshot_discovery(paths: list[str]) -> str:
+    """Prepare a breadth-first discovery capture (depth 1) for one or more safe object paths."""
+    return prepare_game_snapshot_capture("Discovery", paths)
+
+
+@mcp.tool()
 def refine_game_snapshot_capture(max_targets: int = 4) -> str:
-    """Find node-limited paths in the latest bridge snapshot and prepare a deep, targeted follow-up capture."""
+    """Find safely addressable depth/node-limited paths and prepare a deep targeted follow-up capture."""
     if not 1 <= max_targets <= 20:
         raise ValueError("max_targets must be between 1 and 20.")
     snapshot_file = SERVER_ROOT / "game-snapshot.json"
@@ -450,7 +457,7 @@ def refine_game_snapshot_capture(max_targets: int = 4) -> str:
         if len(candidates) >= 500:
             return
         if isinstance(value, dict):
-            if value.get("_truncated") == "node_limit" and _is_allowed_bridge_target(path):
+            if value.get("_truncated") in {"node_limit", "depth_limit"} and _is_allowed_bridge_target(path):
                 candidates.append(path)
                 return
             for name, child in value.items():

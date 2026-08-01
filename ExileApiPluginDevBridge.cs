@@ -78,13 +78,14 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
 
     private sealed class CapturePlan
     {
-        public CapturePlan(string profile, IEnumerable<string> shortcuts, int maxDepth, int maxNodes, int maxCollectionEntries)
+        public CapturePlan(string profile, IEnumerable<string> shortcuts, int maxDepth, int maxNodes, int maxCollectionEntries, int maxProperties)
         {
             Profile = profile;
             Shortcuts = shortcuts.ToArray();
             MaxDepth = maxDepth;
             MaxNodes = maxNodes;
             MaxCollectionEntries = maxCollectionEntries;
+            MaxProperties = maxProperties;
         }
 
         public string Profile { get; }
@@ -92,6 +93,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         public int MaxDepth { get; }
         public int MaxNodes { get; }
         public int MaxCollectionEntries { get; }
+        public int MaxProperties { get; }
     }
 
     private sealed class CaptureRequest
@@ -205,7 +207,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
             foreach (var shortcut in plan.Shortcuts)
             {
                 var budget = plan.MaxNodes;
-                capturedRoots[shortcut] = SnapshotValue(ResolveTarget(roots, shortcut), 0, ref budget, plan.MaxDepth, plan.MaxCollectionEntries);
+                capturedRoots[shortcut] = SnapshotValue(ResolveTarget(roots, shortcut), 0, ref budget, plan.MaxDepth, plan.MaxCollectionEntries, plan.MaxProperties);
                 remainingBudgets[shortcut] = Math.Max(0, budget);
             }
             var snapshot = new
@@ -219,6 +221,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                     maxDepth = plan.MaxDepth,
                     maxNodes = plan.MaxNodes,
                     maxCollectionEntries = plan.MaxCollectionEntries,
+                    maxProperties = plan.MaxProperties,
                     maxStringLength = Settings.SnapshotMaxStringLength.Value,
                     includeAddresses = false,
                 },
@@ -272,7 +275,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                 "IngameState.Data.ServerData.CurrencyExchange",
                 "IngameState.Data.ServerData.CurrencyExchangeCategories",
             },
-            "custom" or "targeted" => customShortcuts,
+            "custom" or "targeted" or "discovery" => customShortcuts,
             _ => throw new InvalidOperationException($"Unknown capture profile: {normalized}"),
         };
         var invalid = selected.Where(shortcut => !IsAllowedTarget(availableShortcuts, shortcut)).ToArray();
@@ -280,14 +283,15 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         if (selected.Length == 0) throw new InvalidOperationException("The capture profile selected no shortcuts.");
         return normalized.ToLowerInvariant() switch
         {
-            "player" => new CapturePlan("Player", selected, 8, 5000, 500),
-            "playerinventory" => new CapturePlan("PlayerInventory", selected, 10, 5000, 1000),
-            "uihover" => new CapturePlan("UIHover", selected, 10, 3000, 1000),
-            "ingameui" => new CapturePlan("IngameUI", selected, 8, 5000, 500),
-            "currencyexchange" => new CapturePlan("CurrencyExchange", selected, 12, 5000, 1000),
-            "targeted" => new CapturePlan("Targeted", selected, 12, 5000, 1000),
-            "custom" => new CapturePlan("Custom", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
-            _ => new CapturePlan("Overview", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value),
+            "player" => new CapturePlan("Player", selected, 8, 5000, 500, 80),
+            "playerinventory" => new CapturePlan("PlayerInventory", selected, 10, 5000, 1000, 80),
+            "uihover" => new CapturePlan("UIHover", selected, 10, 3000, 1000, 80),
+            "ingameui" => new CapturePlan("IngameUI", selected, 8, 5000, 500, 80),
+            "currencyexchange" => new CapturePlan("CurrencyExchange", selected, 12, 5000, 1000, 80),
+            "targeted" => new CapturePlan("Targeted", selected, 12, 5000, 1000, 200),
+            "discovery" => new CapturePlan("Discovery", selected, 1, 10000, 1, 500),
+            "custom" => new CapturePlan("Custom", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value, 80),
+            _ => new CapturePlan("Overview", selected, Settings.SnapshotMaxDepth.Value, Settings.SnapshotMaxNodes.Value, Settings.SnapshotMaxCollectionEntries.Value, 80),
         };
     }
 
@@ -390,7 +394,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         return string.IsNullOrWhiteSpace(configuredPath) ? filename : configuredPath;
     }
 
-    private object SnapshotValue(object value, int depth, ref int budget, int maxDepth, int maxCollectionEntries)
+    private object SnapshotValue(object value, int depth, ref int budget, int maxDepth, int maxCollectionEntries, int maxProperties)
     {
         if (value == null) return null;
         if (budget-- <= 0) return new Dictionary<string, object> { ["_truncated"] = "node_limit" };
@@ -415,7 +419,7 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
                     items.Add(new Dictionary<string, object> { ["_truncated"] = "collection_limit" });
                     break;
                 }
-                items.Add(SnapshotValue(item, depth + 1, ref budget, maxDepth, maxCollectionEntries));
+                items.Add(SnapshotValue(item, depth + 1, ref budget, maxDepth, maxCollectionEntries, maxProperties));
             }
             return items;
         }
@@ -423,12 +427,12 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         var result = new Dictionary<string, object> { ["_type"] = type.FullName };
         foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
                      .OrderBy(property => IsSimpleType(property.PropertyType) ? 0 : 1)
-                     .Take(80))
+                     .Take(maxProperties))
         {
             if (!property.CanRead || property.GetIndexParameters().Length != 0 || ExcludedProperties.Contains(property.Name)) continue;
             try
             {
-                result[property.Name] = SnapshotValue(property.GetValue(value), depth + 1, ref budget, maxDepth, maxCollectionEntries);
+                result[property.Name] = SnapshotValue(property.GetValue(value), depth + 1, ref budget, maxDepth, maxCollectionEntries, maxProperties);
             }
             catch (Exception exception)
             {
