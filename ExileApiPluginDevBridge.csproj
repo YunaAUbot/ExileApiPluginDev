@@ -11,6 +11,9 @@
     <OutputPath Condition="'$(ExApiPluginOutputPath)' != ''">$(ExApiPluginOutputPath)$(MSBuildProjectName)</OutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="ExileCore">
       <HintPath>$(exapiPackage)\ExileCore.dll</HintPath>
       <Private>False</Private>

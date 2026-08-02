@@ -19,9 +19,28 @@ python3 -m venv .venv
 .venv/bin/exileapi-plugin-dev
 ```
 
+## Controller-side verification
+
+The collection-index path resolver is covered by a game-independent .NET test project:
+
+```bash
+"${DOTNET_ROOT:-$HOME/.dotnet}/dotnet" test \
+  tests/ExileApiPluginDevBridge.Core.Tests/ExileApiPluginDevBridge.Core.Tests.csproj
+```
+
+A full bridge build additionally needs the matching `ExileCore.dll` and `GameOffsets.dll` directory:
+
+```bash
+"${DOTNET_ROOT:-$HOME/.dotnet}/dotnet" build ExileApiPluginDevBridge.csproj \
+  -p:EnableWindowsTargeting=true \
+  -p:exapiPackage=/path/to/pinned/exileapi-runtime
+```
+
+The main bridge project explicitly excludes `tests/**/*.cs` so ExileAPI's source compiler does not compile xUnit sources or nested test build artifacts.
+
 The repository is linked into ExileAPI source plugins at:
 
-`~/ExileApi-Compiled/Plugins/Source/ExileApiPluginDev -> ~/ExileApiPluginDev`
+`~/ExileApi-Compiled/Plugins/Source/ExileApiPluginDev -> ~/ExileApiPlugins/ExileApiPluginDev`
 
 ExileAPI owns compilation and reload. Use its in-game **Build/Reload** button after source changes; no Linux build worker is required.
 `Errors.txt` may be retained after a successful build, so the MCP also reports its modification time.
