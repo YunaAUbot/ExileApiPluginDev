@@ -23,8 +23,8 @@ public sealed class BridgeSettings : ISettings
     public ToggleNode Enable { get; set; } = new(true);
     [Menu(null, "Derive bridge files from the Plugins/Source symlink; disable only for a manual location")]
     public ToggleNode UseAutoPathDiscovery { get; set; } = new(true);
-    public TextNode StatusFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\runtime-status.json");
-    public TextNode SnapshotFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\game-snapshot.json");
+    public TextNode StatusFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPlugins\ExileApiPluginDev\runtime-status.json");
+    public TextNode SnapshotFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPlugins\ExileApiPluginDev\game-snapshot.json");
     [Menu(null, "Select exactly one capture profile")]
     public ToggleNode CaptureOverviewProfile { get; set; } = new(true);
     [Menu(null, "Select exactly one capture profile")]
@@ -42,7 +42,7 @@ public sealed class BridgeSettings : ISettings
     [Menu(null, "Only used by Custom; comma-separated DevTree shortcuts")]
     public TextNode CustomSnapshotShortcuts { get; set; } = new TextNode("PlayerInventory.Items");
     [Menu(null, "An MCP request here is applied only after the Capture snapshot button is pressed")]
-    public TextNode CaptureRequestFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPluginDev\capture-request.json");
+    public TextNode CaptureRequestFilePath { get; set; } = new TextNode(@"Z:\home\auron\ExileApiPlugins\ExileApiPluginDev\capture-request.json");
     [Menu(null, "Allow a prepared MCP request to override the selected profile for this capture")]
     public ToggleNode UsePendingMcpCaptureRequest { get; set; } = new(false);
     [Menu(null, "Poll once per second and automatically execute a prepared MCP capture request")]
@@ -340,6 +340,13 @@ public sealed class BridgePlugin : BaseSettingsPlugin<BridgeSettings>
         foreach (var segment in target[root.Length..].Split('.', StringSplitOptions.RemoveEmptyEntries))
         {
             if (value == null) return null;
+            if (value is IList collection && int.TryParse(segment, out var index))
+            {
+                if (index < 0 || index >= collection.Count)
+                    throw new InvalidOperationException($"Target path index {index} is outside collection bounds in {target}");
+                value = collection[index];
+                continue;
+            }
             var property = value.GetType().GetProperty(segment, BindingFlags.Instance | BindingFlags.Public);
             if (property == null || !property.CanRead || property.GetIndexParameters().Length != 0)
                 throw new InvalidOperationException($"Target path cannot read '{segment}' in {target}");
