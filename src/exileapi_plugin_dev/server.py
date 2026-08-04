@@ -73,7 +73,13 @@ mcp = FastMCP(
     "ExileAPI Plugin Development",
     instructions=(
         "Use this server to inspect an ExileAPI installation, scaffold source-only "
-        "plugins, and prepare the in-game Build/Reload workflow. Do not treat it as a game automation API."
+        "plugins, and prepare the in-game Build/Reload workflow. Do not treat it as a game automation API. "
+        "For an unknown live-game struct, you MUST use the scan workflow: begin_game_struct_scan, wait for the "
+        "bridge capture, inspect_game_snapshot/read_game_snapshot_path, then continue_game_struct_scan for only "
+        "the relevant truncated branches. Repeat until an exact path is evidenced; only then use a Targeted capture. "
+        "Never add bridge properties, capture profiles, reflection rules, or plugin features merely to find an "
+        "unknown struct. Change the bridge only when scan evidence demonstrates a real bridge defect or an "
+        "unsupported, stable requirement."
     ),
 )
 
@@ -337,7 +343,7 @@ def read_game_snapshot(section: str | None = None, max_characters: int = 60000) 
 def prepare_game_snapshot_capture(
     profile: str, custom_sections: list[str] | None = None, conditions: list[dict[str, str]] | None = None
 ) -> str:
-    """Prepare a bounded bridge capture profile; the user must still press Capture snapshot in-game."""
+    """Prepare a bounded bridge capture; for unknown structs use begin_game_struct_scan, not Targeted/Custom directly."""
     matched_profile = next((name for name in BRIDGE_CAPTURE_PROFILES if name.casefold() == profile.strip().casefold()), None)
     if not matched_profile:
         raise ValueError(f"Unknown profile. Available profiles: {', '.join(BRIDGE_CAPTURE_PROFILES)}")
@@ -434,23 +440,12 @@ def _is_allowed_bridge_target(target: str) -> bool:
 
 @mcp.tool()
 def prepare_game_snapshot_discovery(paths: list[str]) -> str:
-    """Prepare a breadth-first discovery capture (depth 1) for one or more safe object paths."""
+    """Prepare one breadth-first layer (depth 1). Use this repeatedly to locate an unknown struct safely."""
     return prepare_game_snapshot_capture("Discovery", paths)
 
 
-@mcp.tool()
-def refine_game_snapshot_capture(max_targets: int = 4) -> str:
-    """Find safely addressable depth/node-limited paths and prepare a deep targeted follow-up capture."""
-    if not 1 <= max_targets <= 20:
-        raise ValueError("max_targets must be between 1 and 20.")
-    snapshot_file = SERVER_ROOT / "game-snapshot.json"
-    if not snapshot_file.is_file():
-        raise ValueError("No bridge snapshot exists. Capture an overview or discovery profile first.")
-    try:
-        snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Latest bridge snapshot is invalid JSON: {error.msg}") from error
-
+def _truncated_snapshot_paths(snapshot: dict[str, object]) -> list[str]:
+    """Return property paths that can be explored in the next shallow scan."""
     candidates: list[str] = []
 
     def visit(value: object, path: str) -> None:
@@ -461,29 +456,110 @@ def refine_game_snapshot_capture(max_targets: int = 4) -> str:
                 candidates.append(path)
                 return
             for name, child in value.items():
-                if name.startswith("_"):
-                    continue
-                visit(child, f"{path}.{name}")
-        elif isinstance(value, list):
-            # Collection indexes are intentionally not supported as target paths.
-            return
+                if not name.startswith("_"):
+                    visit(child, f"{path}.{name}")
 
-    for root, value in snapshot.get("shortcuts", {}).items():
-        visit(value, root)
-    def target_score(path: str) -> tuple[int, int, str]:
-        # Prefer shallow domain data over repeated Element geometry.  The root name
-        # itself (e.g. CurrencyExchangePanel) is deliberately excluded from the
-        # keyword check so it cannot make every descendant look equally relevant.
-        suffix = path.split(".", 2)[-1].casefold()
+    shortcuts = snapshot.get("shortcuts", {})
+    if isinstance(shortcuts, dict):
+        for root, value in shortcuts.items():
+            visit(value, root)
+    return list(dict.fromkeys(candidates))
+
+
+def _rank_scan_paths(paths: list[str], goal: str) -> list[str]:
+    """Prefer semantic leaves related to the stated goal over UI geometry."""
+    goal_words = tuple(word for word in re.findall(r"[a-z0-9]{3,}", goal.casefold()))
+    relevant = ("text", "order", "offer", "wanted", "stock", "market", "rate", "currency", "item", "count")
+    noisy = ("root", "parent", "childhash", "pathfromroot", "getclientrectcache", "position", "scrolloffset", "issaturated", "isvalid", "bgcolor", "bordercolor", "center", "children")
+
+    def score(path: str) -> tuple[int, int, str]:
         leaf = path.rsplit(".", 1)[-1].casefold()
-        relevant = ("text", "order", "offer", "wanted", "stock", "market", "rate", "currency", "item", "count")
-        noisy = ("root", "parent", "childhash", "pathfromroot", "getclientrectcache", "position", "scrolloffset", "issaturated", "isvalid", "bgcolor", "bordcolor", "center", "children")
-        depth = path.count(".")
-        relevance_penalty = 0 if any(term in leaf for term in relevant) else 100
+        goal_penalty = 0 if any(word in path.casefold() for word in goal_words) else 50
+        relevant_penalty = 0 if any(term in leaf for term in relevant) else 100
         noise_penalty = 200 if any(term in leaf for term in noisy) else 0
-        return relevance_penalty + noise_penalty + depth * 5, depth, path
+        return goal_penalty + relevant_penalty + noise_penalty + path.count(".") * 5, path.count("."), path
 
-    paths = sorted(set(candidates), key=target_score)[:max_targets]
+    return sorted(set(paths), key=score)
+
+
+@mcp.tool()
+def get_game_struct_scan_protocol() -> str:
+    """Return the mandatory evidence-first workflow for locating an unknown ExileAPI struct."""
+    return json.dumps(
+        {
+            "rule": "Do not modify the bridge/plugin to discover a struct. First obtain scan evidence.",
+            "workflow": [
+                "Call begin_game_struct_scan with a concise goal and 1-3 plausible DevTree roots.",
+                "Wait for the bridge request to be captured (auto-poller or in-game Capture snapshot).",
+                "Call inspect_game_snapshot with a small relevant query, then read_game_snapshot_path for promising paths.",
+                "If a promising value is depth_limit/node_limit, call continue_game_struct_scan; it prepares the next shallow layer only.",
+                "Repeat the inspect/read/continue loop until the exact property path and type are evidenced.",
+                "Only then call prepare_game_snapshot_capture('Targeted', [exact_path]) for a deep value export.",
+            ],
+            "bridge_change_threshold": "A bridge change needs concrete scan evidence that a stable required path cannot be exported by the existing safe traversal.",
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def begin_game_struct_scan(goal: str, roots: list[str]) -> str:
+    """Start an evidence-first unknown-struct scan with 1-3 plausible roots; never use this to add bridge features."""
+    cleaned_goal = goal.strip()
+    selected_roots = list(dict.fromkeys(roots))
+    if len(cleaned_goal) < 3:
+        raise ValueError("goal must state what data is being sought.")
+    if not 1 <= len(selected_roots) <= 3:
+        raise ValueError("roots must contain 1 to 3 plausible DevTree paths.")
+    prepared = json.loads(prepare_game_snapshot_discovery(selected_roots))
+    prepared.update(
+        {
+            "scan_goal": cleaned_goal,
+            "scan_stage": "initial_breadth_layer",
+            "after_capture": "Call inspect_game_snapshot(query=<goal keyword>) and read only promising exact paths. Do not edit the bridge while searching.",
+        }
+    )
+    return json.dumps(prepared, indent=2)
+
+
+@mcp.tool()
+def continue_game_struct_scan(goal: str, max_paths: int = 3) -> str:
+    """Prepare the next shallow scan layer from latest depth/node limits; use before any deep Targeted capture."""
+    if not 1 <= max_paths <= 5:
+        raise ValueError("max_paths must be between 1 and 5.")
+    snapshot_file, snapshot = _load_bridge_snapshot()
+    candidates = _rank_scan_paths(_truncated_snapshot_paths(snapshot), goal)
+    selected = candidates[:max_paths]
+    if not selected:
+        return json.dumps(
+            {
+                "prepared": False,
+                "scan_goal": goal,
+                "snapshot_file": str(snapshot_file),
+                "reason": "No safely addressable depth_limit/node_limit paths exist. Inspect the current snapshot and choose an evidenced exact path, or choose another root.",
+            },
+            indent=2,
+        )
+    prepared = json.loads(prepare_game_snapshot_discovery(selected))
+    prepared.update(
+        {
+            "scan_goal": goal,
+            "scan_stage": "next_breadth_layer",
+            "selected_paths": selected,
+            "after_capture": "Inspect only these paths. Repeat this tool for further unknown object layers; use Targeted only after the exact desired path is confirmed.",
+        }
+    )
+    return json.dumps(prepared, indent=2)
+
+
+@mcp.tool()
+def refine_game_snapshot_capture(max_targets: int = 4) -> str:
+    """Legacy fast path: deep-capture truncated paths. Prefer continue_game_struct_scan while a struct is unknown."""
+    if not 1 <= max_targets <= 20:
+        raise ValueError("max_targets must be between 1 and 20.")
+    _, snapshot = _load_bridge_snapshot()
+    candidates = _truncated_snapshot_paths(snapshot)
+    paths = _rank_scan_paths(candidates, "currency offer item count")[:max_targets]
     if not paths:
         return json.dumps(
             {
